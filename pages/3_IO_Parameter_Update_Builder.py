@@ -14,14 +14,14 @@ from services.ui_helpers import render_connection_form
 
 st.set_page_config(page_title="IO Update Builder", page_icon="🛠️", layout="wide")
 st.title("🛠️ IO Update Builder")
-st.caption("Patch v2.5 — Organization Usage menambahkan helper ManufacturingCalendarId untuk create plantParameters jika Manufacturing/Maintenance dicentang.")
+st.caption("Patch v2.6 — Organization Usage menambahkan DefSupplySubinv & DefCompltnSubinv untuk create plantParameters Manufacturing/Maintenance.")
 
 PARAM_MAPPING_BASE = load_schema("io_parameters_update")
 USAGE_MAPPING_BASE = load_schema("organization_usage_update")
 
 st.info(
     "Gunakan page ini untuk fetch existing IO dari Oracle, pilih sampai 50 IO, lalu generate template update berbasis current value. "
-    "Pilih **IO Parameters** untuk child invOrgParameters, atau **Organization Usage** untuk parent inventoryOrganizations. Jika memilih Manufacturing/Maintenance, isi ManufacturingCalendarId bila tersedia; kalau kosong, runner akan mencoba fallback dari invOrgParameters.ScheduleId saat live run."
+    "Pilih **IO Parameters** untuk child invOrgParameters, atau **Organization Usage** untuk parent inventoryOrganizations. Jika memilih Manufacturing/Maintenance, isi ManufacturingCalendarId serta DefSupplySubinv dan DefCompltnSubinv. Calendar bisa fallback dari invOrgParameters.ScheduleId saat live run."
 )
 
 PARAM_ROUTE_COLUMNS = ["OrganizationCode", "OrganizationId", "OrganizationId2"]
@@ -362,8 +362,8 @@ def _render_template_preview(update_area: str, rows: List[Dict[str, Any]]) -> No
     else:
         base_mapping = USAGE_MAPPING_BASE
         route_cols = USAGE_ROUTE_COLUMNS
-        state_key = "usage_builder_selected_payload_v24"
-        default_sections = ["Additional Usages"]
+        state_key = "usage_builder_selected_payload_v26"
+        default_sections = ["Plant Parameters Helper", "Additional Usages"]
         prefix = "organization_usage_update"
         title = "Organization Usage"
 

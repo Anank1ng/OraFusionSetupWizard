@@ -19,7 +19,7 @@ from services.validation_service import validation_summary
 
 st.set_page_config(page_title="Setup Runner", page_icon="🚀", layout="wide")
 st.title("🚀 Setup Runner")
-st.caption("Patch v2.5 — Patch Organization Usage sekarang auto-create plantParameters untuk Manufacturing/Maintenance jika diperlukan.")
+st.caption("Patch v2.6 — Patch Organization Usage sekarang butuh DefSupplySubinv & DefCompltnSubinv untuk auto-create plantParameters Manufacturing/Maintenance.")
 
 BUILT_IN_MAPPINGS = {
     "Create Minimal IO": filter_mapping_by_preset(load_schema("minimal_inventory_organizations"), "minimal"),
