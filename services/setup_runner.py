@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 
 from services.oracle_client import OracleFusionClient
-from services.payload_builder import PayloadBuildError, build_payload_from_row, is_blank
+from services.payload_builder import PayloadBuildError, build_payload_from_row, is_blank, parse_bool
 from services.reference_service import fetch_inv_org_parameters
 
 
@@ -256,6 +256,151 @@ def run_patch_io_parameters(
     return pd.DataFrame(logs)
 
 
+
+
+def _extract_items_from_body(body: Any) -> List[Dict[str, Any]]:
+    if isinstance(body, dict) and isinstance(body.get("items"), list):
+        return body["items"]
+    if isinstance(body, list):
+        return body
+    return []
+
+
+def _row_value(row: pd.Series, candidates: List[str]) -> Any:
+    for col in candidates:
+        if col in row and not is_blank(row.get(col)):
+            return row.get(col)
+    return None
+
+
+def _row_bool(row: pd.Series, col: str) -> bool:
+    if col not in row or is_blank(row.get(col)):
+        return False
+    try:
+        return bool(parse_bool(row.get(col)))
+    except Exception:
+        return False
+
+
+def fetch_plant_parameters(client: OracleFusionClient, organization_id: int) -> tuple[pd.DataFrame, Any]:
+    endpoint = f"/fscmRestApi/resources/11.13.18.05/inventoryOrganizations/{organization_id}/child/plantParameters"
+    response = client.get(endpoint, params={"onlyData": "true", "limit": 10})
+    return pd.DataFrame(_extract_items_from_body(response.body)), response
+
+
+def _resolve_manufacturing_calendar_id(row: pd.Series, org_id: int, client: Optional[OracleFusionClient], dry_run: bool) -> Optional[int]:
+    raw = _row_value(row, [
+        "ManufacturingCalendarId",
+        "PlantManufacturingCalendarId",
+        "plantParameters.ManufacturingCalendarId",
+        "ScheduleId",
+        "invOrgParameters.ScheduleId",
+    ])
+    if not is_blank(raw):
+        try:
+            return int(float(raw))
+        except Exception:
+            raise PayloadBuildError(f"ManufacturingCalendarId tidak valid: {raw!r}")
+
+    if dry_run:
+        return 0
+
+    if client is not None:
+        # Most IOs already have invOrgParameters.ScheduleId from minimal create.
+        # Reuse it as manufacturing calendar when explicit ManufacturingCalendarId isn't supplied.
+        params_df, _ = fetch_inv_org_parameters(client, int(org_id))
+        if not params_df.empty:
+            first = params_df.iloc[0]
+            for candidate in ["ScheduleId", "ManufacturingCalendarId"]:
+                if candidate in params_df.columns and not is_blank(first.get(candidate)):
+                    try:
+                        return int(float(first.get(candidate)))
+                    except Exception:
+                        pass
+    return None
+
+
+def _plant_payload_from_row(row: pd.Series, org_id: int, client: Optional[OracleFusionClient], dry_run: bool) -> Dict[str, Any]:
+    calendar_id = _resolve_manufacturing_calendar_id(row, org_id, client, dry_run)
+    if calendar_id is None:
+        raise PayloadBuildError(
+            "ManufacturingCalendarId wajib untuk membuat plantParameters. "
+            "Isi kolom ManufacturingCalendarId, atau pastikan IO punya invOrgParameters.ScheduleId yang bisa diambil app."
+        )
+    payload: Dict[str, Any] = {"ManufacturingCalendarId": calendar_id}
+
+    optional_fields = {
+        "DefaultWorkMethod": "DefaultWorkMethod",
+        "EnableProcessManufacturingFlag": "EnableProcessManufacturingFlag",
+        "DefaultSupplySubinventory": "DefaultSupplySubinventory",
+        "DefaultCompletionSubinventory": "DefaultCompletionSubinventory",
+    }
+    for col, payload_key in optional_fields.items():
+        if col in row and not is_blank(row.get(col)):
+            val = row.get(col)
+            if col == "EnableProcessManufacturingFlag":
+                val = parse_bool(val)
+            payload[payload_key] = val
+    return payload
+
+
+def ensure_plant_parameters_for_usage(
+    row: pd.Series,
+    org_id: int,
+    client: Optional[OracleFusionClient],
+    dry_run: bool,
+) -> Dict[str, Any]:
+    """Create plantParameters when user marks an IO as Manufacturing/Maintenance.
+
+    Oracle may accept PATCH on the parent inventory organization with HTTP 200, but the UI checkbox
+    won't actually turn on unless the related child plantParameters row exists.
+    """
+    plant_payload = _plant_payload_from_row(row, org_id, client, dry_run)
+    collection_endpoint = f"/fscmRestApi/resources/11.13.18.05/inventoryOrganizations/{org_id}/child/plantParameters"
+
+    if dry_run:
+        return {
+            "action": "dry_run_create_plant_parameters_if_missing",
+            "success": True,
+            "status_code": 0,
+            "endpoint": collection_endpoint,
+            "request_payload": plant_payload,
+            "response_body": {"dry_run": True, "message": "Dry run only"},
+        }
+
+    if client is None:
+        raise RuntimeError("Client Oracle belum tersedia")
+
+    plant_df, get_resp = fetch_plant_parameters(client, org_id)
+    if not plant_df.empty:
+        first = plant_df.iloc[0]
+        plant_id = None
+        for candidate in ["OrganizationId4", "OrganizationId", "PlantParameterId"]:
+            if candidate in plant_df.columns and not is_blank(first.get(candidate)):
+                try:
+                    plant_id = int(float(first.get(candidate)))
+                    break
+                except Exception:
+                    pass
+        return {
+            "action": "plant_parameters_already_exist",
+            "success": True,
+            "status_code": get_resp.status_code,
+            "endpoint": collection_endpoint if plant_id is None else f"{collection_endpoint}/{plant_id}",
+            "request_payload": None,
+            "response_body": get_resp.body,
+        }
+
+    post_resp = client.post(collection_endpoint, plant_payload)
+    return {
+        "action": "create_plant_parameters",
+        "success": post_resp.ok,
+        "status_code": post_resp.status_code,
+        "endpoint": collection_endpoint,
+        "request_payload": plant_payload,
+        "response_body": post_resp.body,
+    }
+
 def run_patch_organization_usage(
     df: pd.DataFrame,
     mapping: Dict[str, Any],
@@ -275,10 +420,15 @@ def run_patch_organization_usage(
             row["OrganizationId"] = org_id
             payload = build_payload_from_row(row, mapping)
             endpoint = mapping["endpoint_template"].format(OrganizationId=org_id)
+            plant_result = None
+            needs_plant_parameters = _row_bool(row, "ManufacturingPlantFlag") or _row_bool(row, "MaintenanceEnabledFlag")
+
             if config.dry_run:
                 ok = True
                 status_code = 0
                 response_body = {"dry_run": True, "message": "Dry run only"}
+                if needs_plant_parameters:
+                    plant_result = ensure_plant_parameters_for_usage(row, org_id, client, config.dry_run)
             else:
                 if client is None:
                     raise RuntimeError("Client Oracle belum tersedia")
@@ -286,6 +436,17 @@ def run_patch_organization_usage(
                 ok = resp.ok
                 status_code = resp.status_code
                 response_body = resp.body
+                if ok and needs_plant_parameters:
+                    plant_result = ensure_plant_parameters_for_usage(row, org_id, client, config.dry_run)
+                    ok = bool(ok and plant_result.get("success"))
+
+            message = "OK" if ok else _body_to_text(response_body)
+            if plant_result:
+                if plant_result.get("success"):
+                    message = f"{message}; plantParameters: {plant_result.get('action')} OK"
+                else:
+                    message = f"{message}; plantParameters FAILED: {_body_to_text(plant_result.get('response_body'))}"
+
             logs.append({
                 "step": "Patch Organization Usage",
                 "excel_row": int(i) + 2,
@@ -296,7 +457,12 @@ def run_patch_organization_usage(
                 "endpoint": endpoint,
                 "request_payload": payload,
                 "response_body": response_body,
-                "message": "OK" if ok else _body_to_text(response_body),
+                "plant_parameters_action": plant_result.get("action") if plant_result else None,
+                "plant_parameters_status_code": plant_result.get("status_code") if plant_result else None,
+                "plant_parameters_endpoint": plant_result.get("endpoint") if plant_result else None,
+                "plant_parameters_payload": plant_result.get("request_payload") if plant_result else None,
+                "plant_parameters_response": plant_result.get("response_body") if plant_result else None,
+                "message": message,
             })
         except Exception as exc:
             logs.append({
