@@ -13,18 +13,19 @@ from services.excel_service import (
 )
 from services.oracle_client import OracleFusionClient
 from services.reference_service import fetch_inventory_orgs, organization_lookup_from_reference
-from services.setup_runner import RunnerConfig, run_create_io, run_create_subinventories, run_patch_io_parameters
+from services.setup_runner import RunnerConfig, run_create_io, run_create_subinventories, run_patch_io_parameters, run_patch_organization_usage
 from services.ui_helpers import render_connection_form
 from services.validation_service import validation_summary
 
 st.set_page_config(page_title="Setup Runner", page_icon="🚀", layout="wide")
 st.title("🚀 Setup Runner")
-st.caption("Patch v2.1 — runner dipisah per entitas: Create Minimal IO, Create Subinventories, atau Patch IO Parameters.")
+st.caption("Patch v2.4 — runner per entitas + Patch Organization Usage.")
 
 BUILT_IN_MAPPINGS = {
     "Create Minimal IO": filter_mapping_by_preset(load_schema("minimal_inventory_organizations"), "minimal"),
     "Create Subinventories": filter_mapping_by_preset(load_schema("subinventories"), "minimal"),
     "Patch IO Parameters": filter_mapping_by_preset(load_schema("io_parameters_update"), "standard"),
+    "Patch Organization Usage": filter_mapping_by_preset(load_schema("organization_usage_update"), "standard"),
 }
 
 PROCESS_NOTES = {
@@ -42,6 +43,11 @@ PROCESS_NOTES = {
         "sheet": "IO_Parameters_Update",
         "desc": "Update parameter IO seperti default subinventory, inventory settings, lot/serial, movement request, dan lainnya.",
         "needs": "Butuh OrganizationId dan child key invOrgParameters. App akan GET child invOrgParameters saat live run.",
+    },
+    "Patch Organization Usage": {
+        "sheet": "Organization_Usage_Update",
+        "desc": "Update parent Inventory Organization untuk Additional Usages seperti manufacturing plant, maintenance, contract manufacturer, dan integrated system type.",
+        "needs": "Butuh OrganizationId. Bisa isi langsung di Excel, atau isi OrganizationCode lalu app akan resolve dari existing IO saat live run.",
     },
 }
 
@@ -104,8 +110,9 @@ st.subheader("1. Download template bawaan")
 io_mapping_builtin = BUILT_IN_MAPPINGS["Create Minimal IO"]
 subinv_mapping_builtin = BUILT_IN_MAPPINGS["Create Subinventories"]
 params_mapping_builtin = BUILT_IN_MAPPINGS["Patch IO Parameters"]
+usage_mapping_builtin = BUILT_IN_MAPPINGS["Patch Organization Usage"]
 
-c_dl1, c_dl2, c_dl3, c_dl4 = st.columns(4)
+c_dl1, c_dl2, c_dl3, c_dl4, c_dl5 = st.columns(5)
 with c_dl1:
     st.download_button(
         "Download Full Setup Workbook",
@@ -138,12 +145,20 @@ with c_dl4:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
     )
+with c_dl5:
+    st.download_button(
+        "Template Org Usage",
+        data=make_template_excel_bytes(usage_mapping_builtin),
+        file_name="organization_usage_update_template.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+    )
 
 st.divider()
 st.subheader("2. Pilih proses yang mau dijalankan")
 process = st.radio(
     "Entity process",
-    ["Create Minimal IO", "Create Subinventories", "Patch IO Parameters"],
+    ["Create Minimal IO", "Create Subinventories", "Patch IO Parameters", "Patch Organization Usage"],
     horizontal=True,
     label_visibility="collapsed",
 )
@@ -284,7 +299,7 @@ if uploaded:
 
         org_map: Dict[str, int] = dict(seeded_org_map)
         # For isolated Subinventory/Patch runs, resolve OrganizationCode from Oracle when live.
-        if process in {"Create Subinventories", "Patch IO Parameters"} and not dry_run and client is not None:
+        if process in {"Create Subinventories", "Patch IO Parameters", "Patch Organization Usage"} and not dry_run and client is not None:
             try:
                 ref_df, _ = fetch_inventory_orgs(client, limit=500, expand_children=False)
                 org_map.update(organization_lookup_from_reference(ref_df))
@@ -297,8 +312,10 @@ if uploaded:
             org_map.update(created_map)
         elif process == "Create Subinventories":
             log_df = run_create_subinventories(run_df, mapping, client, cfg, org_map)
-        else:
+        elif process == "Patch IO Parameters":
             log_df = run_patch_io_parameters(run_df, mapping, client, cfg, org_map)
+        else:
+            log_df = run_patch_organization_usage(run_df, mapping, client, cfg, org_map)
 
         st.session_state["entity_runner_log"] = log_df
         st.session_state["entity_runner_org_map"] = org_map
