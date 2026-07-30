@@ -11,7 +11,7 @@ st.caption("Create Minimal IO → Create Subinventories → Update IO Parameters
 
 st.markdown(
     """
-Aplikasi ini adalah versi baru dari runner kita, tapi alurnya dibuat lebih aman untuk setup Inventory Organization.
+Aplikasi yang digunakan untuk melakukan pembuatan Inventory Organization di oracle fusion
 
 ### Flow utama
 1. **Minimal IO Builder** — buat template 12 field minimal untuk create Inventory Organization.
