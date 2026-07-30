@@ -14,7 +14,7 @@ from services.ui_helpers import render_connection_form
 
 st.set_page_config(page_title="IO Parameter Update Builder", page_icon="🛠️", layout="wide")
 st.title("🛠️ IO Parameter Update Builder")
-st.caption("Patch v2.2 — fetch existing IO, pilih sampai 50 IO, lalu generate template PATCH dari current value Oracle.")
+st.caption("Patch v2.3 — fetch existing IO, edit True/False langsung di preview, lalu download template PATCH.")
 
 BASE_MAPPING = load_schema("io_parameters_update")
 st.info(schema_title(BASE_MAPPING))
@@ -111,6 +111,51 @@ def _add_display_field_to_mapping(mapping: Dict[str, Any]) -> Dict[str, Any]:
 
 def _field_lookup(mapping: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     return {f.get("excel_column"): f for f in mapping.get("fields", []) if f.get("excel_column")}
+
+def _to_editor_bool(value: Any) -> bool:
+    """Normalisasi value Oracle/Excel supaya kolom boolean nyaman diedit sebagai checkbox."""
+    if is_blank(value):
+        return False
+    if isinstance(value, bool):
+        return value
+    if type(value).__module__.startswith("numpy") and type(value).__name__.startswith("bool"):
+        return bool(value)
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value) == 1
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "t", "yes", "y", "1", "ya", "iya"}:
+            return True
+        if normalized in {"false", "f", "no", "n", "0", "tidak", "nggak", "ga", "gak"}:
+            return False
+    return bool(value)
+
+
+def _prepare_editor_dataframe(df: pd.DataFrame, mapping: Dict[str, Any]) -> pd.DataFrame:
+    """Pastikan boolean field tampil sebagai checkbox di st.data_editor."""
+    edited_df = df.copy().astype(object)
+    lookup = _field_lookup(mapping)
+    for col in edited_df.columns:
+        field = lookup.get(col, {})
+        if field.get("type") == "boolean":
+            edited_df[col] = edited_df[col].map(_to_editor_bool).astype(bool)
+    return edited_df
+
+
+def _editor_column_config(mapping: Dict[str, Any]) -> Dict[str, Any]:
+    """Konfigurasi kolom agar boolean editable sebagai checkbox dan route field terkunci."""
+    lookup = _field_lookup(mapping)
+    config: Dict[str, Any] = {}
+    for col, field in lookup.items():
+        label = field.get("label") or col
+        help_text = field.get("description") or field.get("reference_hint") or None
+        if field.get("type") == "boolean":
+            config[col] = st.column_config.CheckboxColumn(label=label, help=help_text)
+        elif field.get("type") == "integer":
+            config[col] = st.column_config.NumberColumn(label=label, help=help_text, step=1, format="%d")
+        else:
+            config[col] = st.column_config.TextColumn(label=label, help=help_text)
+    return config
 
 
 def _field_default_from_reference(field: Dict[str, Any], org_row: Dict[str, Any], param_row: Dict[str, Any]) -> Any:
@@ -347,14 +392,28 @@ if reference_rows:
     m3.metric("Payload fields", payload_fields_count)
     m4.metric("Route/display fields", len(template_df.columns) - payload_fields_count)
 
-    with st.expander("Preview data template", expanded=True):
-        st.dataframe(template_df, use_container_width=True)
+    with st.expander("Preview & edit data template", expanded=True):
+        st.caption(
+            "Field True/False bisa diedit langsung sebagai checkbox. "
+            "Route/display field seperti OrganizationCode, OrganizationId, OrganizationId2, dan OrganizationName dikunci supaya tidak sengaja berubah."
+        )
+        editor_df = _prepare_editor_dataframe(template_df, selected_mapping)
+        disabled_columns = [col for col in ["OrganizationCode", "OrganizationName", "OrganizationId", "OrganizationId2"] if col in editor_df.columns]
+        edited_template_df = st.data_editor(
+            editor_df,
+            use_container_width=True,
+            hide_index=True,
+            num_rows="fixed",
+            disabled=disabled_columns,
+            column_config=_editor_column_config(selected_mapping),
+            key="param_update_template_editor",
+        )
 
     sample_patch_payload = {}
     sample_payload_error = None
-    if not template_df.empty:
+    if not edited_template_df.empty:
         try:
-            sample_patch_payload = build_payload_from_row(template_df.iloc[0], selected_mapping)
+            sample_patch_payload = build_payload_from_row(edited_template_df.iloc[0], selected_mapping)
         except Exception as exc:
             sample_payload_error = str(exc)
     with st.expander("Preview sample PATCH payload dari row pertama", expanded=True):
@@ -376,7 +435,7 @@ if reference_rows:
     with d1:
         st.download_button(
             "Download Template Excel",
-            data=make_template_excel_bytes(selected_mapping, template_df=template_df, sheet_name=selected_mapping.get("worksheet_name", "IO_Parameters_Update")),
+            data=make_template_excel_bytes(selected_mapping, template_df=edited_template_df, sheet_name=selected_mapping.get("worksheet_name", "IO_Parameters_Update")),
             file_name="io_parameters_update_from_oracle_reference.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
@@ -400,7 +459,7 @@ if reference_rows:
     with d4:
         st.download_button(
             "Download Bundle ZIP",
-            data=make_bundle_zip_bytes(selected_mapping, template_df=template_df, extra_files=extra_files),
+            data=make_bundle_zip_bytes(selected_mapping, template_df=edited_template_df, extra_files=extra_files),
             file_name="io_parameters_update_reference_bundle.zip",
             mime="application/zip",
             use_container_width=True,
