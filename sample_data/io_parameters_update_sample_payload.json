@@ -1,0 +1,13 @@
+{
+  "ScheduleId": 300000047225452,
+  "AllowNegativeOnhandTransactionsFlag": false,
+  "UseCurrentItemCostFlag": true,
+  "RoundReorderQuantityFlag": false,
+  "UseOriginalReceiptDateFlag": false,
+  "AutomaticallyDeleteAllocationsFlag": false,
+  "PreFillPickedQuantityFlag": false,
+  "CapturePickingExceptionsFlag": true,
+  "PickConfirmationRequiredFlag": false,
+  "DefaultSupplySubinventory": "RAW",
+  "DefaultCompletionSubinventory": "FG"
+}

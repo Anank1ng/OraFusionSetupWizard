@@ -1,0 +1,18 @@
+{
+  "OrganizationCode": "IO_TEST01",
+  "OrganizationName": "IO Test 01",
+  "ManagementBusinessUnitId": 204,
+  "LegalEntityId": 204,
+  "ProfitCenterBusinessUnitId": 204,
+  "Status": "Active",
+  "LocationId": 1001,
+  "InventoryFlag": true,
+  "MasterOrganizationId": 204,
+  "ItemGroupingCode": "ORA_RCS_IGB_DFTN",
+  "ItemDefinitionOrganizationCode": "IO_TEST01",
+  "invOrgParameters": [
+    {
+      "ScheduleId": 300000047225452
+    }
+  ]
+}
