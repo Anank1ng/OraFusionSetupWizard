@@ -50,6 +50,48 @@
       "include_in_standard": true
     },
     {
+      "section": "Plant Parameters Helper",
+      "label": "Manufacturing Calendar ID",
+      "excel_column": "ManufacturingCalendarId",
+      "payload_path": "ManufacturingCalendarId",
+      "type": "integer",
+      "required": false,
+      "sample": "",
+      "send_to_payload": false,
+      "description": "Dipakai app untuk membuat child plantParameters jika ManufacturingPlantFlag atau MaintenanceEnabledFlag dicentang. Jika kosong, runner akan coba memakai invOrgParameters.ScheduleId dari Oracle.",
+      "reference_hint": "Schedules / invOrgParameters.ScheduleId",
+      "include_in_minimal": true,
+      "include_in_standard": true
+    },
+    {
+      "section": "Plant Parameters Helper",
+      "label": "Default Work Method",
+      "excel_column": "DefaultWorkMethod",
+      "payload_path": "DefaultWorkMethod",
+      "type": "string",
+      "required": false,
+      "sample": "",
+      "send_to_payload": false,
+      "description": "Opsional. Ikut dikirim saat create plantParameters jika diisi. Contoh value harus sesuai setup Oracle, misalnya DISCRETE_MANUFACTURING/PROCESS_MANUFACTURING jika valid di instance.",
+      "reference_hint": "Plant parameters",
+      "include_in_minimal": false,
+      "include_in_standard": true
+    },
+    {
+      "section": "Plant Parameters Helper",
+      "label": "Enable Process Manufacturing",
+      "excel_column": "EnableProcessManufacturingFlag",
+      "payload_path": "EnableProcessManufacturingFlag",
+      "type": "boolean",
+      "required": false,
+      "sample": false,
+      "send_to_payload": false,
+      "description": "Opsional. Ikut dikirim saat create plantParameters jika diisi.",
+      "reference_hint": "Plant parameters",
+      "include_in_minimal": false,
+      "include_in_standard": true
+    },
+    {
       "section": "Additional Usages",
       "label": "Organization is a manufacturing plant",
       "excel_column": "ManufacturingPlantFlag",
