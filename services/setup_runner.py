@@ -320,6 +320,19 @@ def _resolve_manufacturing_calendar_id(row: pd.Series, org_id: int, client: Opti
     return None
 
 
+def _resolve_subinventory_code(row: pd.Series, candidates: List[str], label: str) -> str:
+    raw = _row_value(row, candidates)
+    if is_blank(raw):
+        raise PayloadBuildError(
+            f"{label} wajib untuk membuat plantParameters. "
+            "Isi dengan kode/nama subinventory yang sudah dibuat di IO tersebut."
+        )
+    value = str(raw).strip()
+    if not value:
+        raise PayloadBuildError(f"{label} tidak boleh kosong.")
+    return value
+
+
 def _plant_payload_from_row(row: pd.Series, org_id: int, client: Optional[OracleFusionClient], dry_run: bool) -> Dict[str, Any]:
     calendar_id = _resolve_manufacturing_calendar_id(row, org_id, client, dry_run)
     if calendar_id is None:
@@ -327,13 +340,37 @@ def _plant_payload_from_row(row: pd.Series, org_id: int, client: Optional[Oracle
             "ManufacturingCalendarId wajib untuk membuat plantParameters. "
             "Isi kolom ManufacturingCalendarId, atau pastikan IO punya invOrgParameters.ScheduleId yang bisa diambil app."
         )
-    payload: Dict[str, Any] = {"ManufacturingCalendarId": calendar_id}
+
+    supply_subinv = _resolve_subinventory_code(
+        row,
+        [
+            "DefSupplySubinv",
+            "DefaultSupplySubinventory",
+            "plantParameters.DefSupplySubinv",
+            "plantParameters.DefaultSupplySubinventory",
+        ],
+        "DefSupplySubinv / Default Supply Subinventory",
+    )
+    completion_subinv = _resolve_subinventory_code(
+        row,
+        [
+            "DefCompltnSubinv",
+            "DefaultCompletionSubinventory",
+            "plantParameters.DefCompltnSubinv",
+            "plantParameters.DefaultCompletionSubinventory",
+        ],
+        "DefCompltnSubinv / Default Completion Subinventory",
+    )
+
+    payload: Dict[str, Any] = {
+        "ManufacturingCalendarId": calendar_id,
+        "DefSupplySubinv": supply_subinv,
+        "DefCompltnSubinv": completion_subinv,
+    }
 
     optional_fields = {
         "DefaultWorkMethod": "DefaultWorkMethod",
         "EnableProcessManufacturingFlag": "EnableProcessManufacturingFlag",
-        "DefaultSupplySubinventory": "DefaultSupplySubinventory",
-        "DefaultCompletionSubinventory": "DefaultCompletionSubinventory",
     }
     for col, payload_key in optional_fields.items():
         if col in row and not is_blank(row.get(col)):
