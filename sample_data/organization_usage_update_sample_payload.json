@@ -1,5 +1,6 @@
 {
-  "ManufacturingPlantFlag": false,
+  "ManufacturingPlantFlag": true,
   "MaintenanceEnabledFlag": false,
-  "ContractManufacturingFlag": false
+  "ContractManufacturingFlag": false,
+  "IntegratedSystemType": "Oracle Inventory Management"
 }
