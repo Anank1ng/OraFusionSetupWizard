@@ -254,3 +254,64 @@ def run_patch_io_parameters(
             if config.stop_on_error:
                 break
     return pd.DataFrame(logs)
+
+
+def run_patch_organization_usage(
+    df: pd.DataFrame,
+    mapping: Dict[str, Any],
+    client: Optional[OracleFusionClient],
+    config: RunnerConfig,
+    org_map: Dict[str, int],
+) -> pd.DataFrame:
+    """PATCH parent inventoryOrganizations/{OrganizationId} for Additional Usages style fields."""
+    logs: List[Dict[str, Any]] = []
+    for i, row in df.iterrows():
+        org_code = str(row.get("OrganizationCode", "")).strip()
+        try:
+            row = row.copy()
+            org_id = resolve_organization_id(row, org_map)
+            if org_id is None:
+                raise PayloadBuildError("OrganizationId tidak ditemukan. Isi OrganizationId atau pastikan OrganizationCode berhasil dibuat/ditemukan.")
+            row["OrganizationId"] = org_id
+            payload = build_payload_from_row(row, mapping)
+            endpoint = mapping["endpoint_template"].format(OrganizationId=org_id)
+            if config.dry_run:
+                ok = True
+                status_code = 0
+                response_body = {"dry_run": True, "message": "Dry run only"}
+            else:
+                if client is None:
+                    raise RuntimeError("Client Oracle belum tersedia")
+                resp = client.patch(endpoint, payload)
+                ok = resp.ok
+                status_code = resp.status_code
+                response_body = resp.body
+            logs.append({
+                "step": "Patch Organization Usage",
+                "excel_row": int(i) + 2,
+                "business_key": org_code,
+                "success": ok,
+                "status_code": status_code,
+                "OrganizationId": org_id,
+                "endpoint": endpoint,
+                "request_payload": payload,
+                "response_body": response_body,
+                "message": "OK" if ok else _body_to_text(response_body),
+            })
+        except Exception as exc:
+            logs.append({
+                "step": "Patch Organization Usage",
+                "excel_row": int(i) + 2,
+                "business_key": org_code,
+                "success": False,
+                "status_code": None,
+                "OrganizationId": row.get("OrganizationId") if "OrganizationId" in row else None,
+                "endpoint": None,
+                "request_payload": None,
+                "response_body": None,
+                "message": str(exc),
+            })
+            if config.stop_on_error:
+                break
+    return pd.DataFrame(logs)
+
