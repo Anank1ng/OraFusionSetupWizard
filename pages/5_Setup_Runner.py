@@ -19,7 +19,7 @@ from services.validation_service import validation_summary
 
 st.set_page_config(page_title="Setup Runner", page_icon="🚀", layout="wide")
 st.title("🚀 Setup Runner")
-st.caption("Patch v2.4 — runner per entitas + Patch Organization Usage.")
+st.caption("Patch v2.5 — Patch Organization Usage sekarang auto-create plantParameters untuk Manufacturing/Maintenance jika diperlukan.")
 
 BUILT_IN_MAPPINGS = {
     "Create Minimal IO": filter_mapping_by_preset(load_schema("minimal_inventory_organizations"), "minimal"),
@@ -47,7 +47,7 @@ PROCESS_NOTES = {
     "Patch Organization Usage": {
         "sheet": "Organization_Usage_Update",
         "desc": "Update parent Inventory Organization untuk Additional Usages seperti manufacturing plant, maintenance, contract manufacturer, dan integrated system type.",
-        "needs": "Butuh OrganizationId. Bisa isi langsung di Excel, atau isi OrganizationCode lalu app akan resolve dari existing IO saat live run.",
+        "needs": "Butuh OrganizationId. Jika ManufacturingPlantFlag/MaintenanceEnabledFlag dicentang, runner juga butuh ManufacturingCalendarId atau akan coba fallback dari invOrgParameters.ScheduleId.",
     },
 }
 
