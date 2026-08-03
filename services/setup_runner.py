@@ -346,26 +346,26 @@ def _plant_payload_from_row(row: pd.Series, org_id: int, client: Optional[Oracle
         [
             "DefSupplySubinv",
             "DefaultSupplySubinventory",
-            "plantParameters.DefSupplySubinv",
             "plantParameters.DefaultSupplySubinventory",
+            "plantParameters.DefSupplySubinv",
         ],
-        "DefSupplySubinv / Default Supply Subinventory",
+        "DefaultSupplySubinventory / Default Supply Subinventory",
     )
     completion_subinv = _resolve_subinventory_code(
         row,
         [
             "DefCompltnSubinv",
             "DefaultCompletionSubinventory",
-            "plantParameters.DefCompltnSubinv",
             "plantParameters.DefaultCompletionSubinventory",
+            "plantParameters.DefCompltnSubinv",
         ],
-        "DefCompltnSubinv / Default Completion Subinventory",
+        "DefaultCompletionSubinventory / Default Completion Subinventory",
     )
 
     payload: Dict[str, Any] = {
         "ManufacturingCalendarId": calendar_id,
-        "DefSupplySubinv": supply_subinv,
-        "DefCompltnSubinv": completion_subinv,
+        "DefaultSupplySubinventory": supply_subinv,
+        "DefaultCompletionSubinventory": completion_subinv,
     }
 
     optional_fields = {
