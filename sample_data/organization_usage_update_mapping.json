@@ -66,13 +66,13 @@
     {
       "section": "Plant Parameters Helper",
       "label": "Default Supply Subinventory",
-      "excel_column": "DefSupplySubinv",
-      "payload_path": "DefSupplySubinv",
+      "excel_column": "DefaultSupplySubinventory",
+      "payload_path": "DefaultSupplySubinventory",
       "type": "string",
       "required": false,
       "sample": "RAW",
       "send_to_payload": false,
-      "description": "Kode/nama subinventory default supply untuk create plantParameters. Wajib diisi jika ManufacturingPlantFlag atau MaintenanceEnabledFlag dicentang.",
+      "description": "Kode/nama subinventory default supply untuk create plantParameters. Wajib diisi jika ManufacturingPlantFlag atau MaintenanceEnabledFlag dicentang. Dikirim ke REST plantParameters sebagai DefaultSupplySubinventory.",
       "reference_hint": "Isi dengan SecondaryInventoryName dari subinventory yang sudah dibuat di IO tersebut.",
       "include_in_minimal": true,
       "include_in_standard": true
@@ -80,13 +80,13 @@
     {
       "section": "Plant Parameters Helper",
       "label": "Default Completion Subinventory",
-      "excel_column": "DefCompltnSubinv",
-      "payload_path": "DefCompltnSubinv",
+      "excel_column": "DefaultCompletionSubinventory",
+      "payload_path": "DefaultCompletionSubinventory",
       "type": "string",
       "required": false,
       "sample": "FG",
       "send_to_payload": false,
-      "description": "Kode/nama subinventory default completion untuk create plantParameters. Wajib diisi jika ManufacturingPlantFlag atau MaintenanceEnabledFlag dicentang.",
+      "description": "Kode/nama subinventory default completion untuk create plantParameters. Wajib diisi jika ManufacturingPlantFlag atau MaintenanceEnabledFlag dicentang. Dikirim ke REST plantParameters sebagai DefaultCompletionSubinventory.",
       "reference_hint": "Isi dengan SecondaryInventoryName dari subinventory yang sudah dibuat di IO tersebut.",
       "include_in_minimal": true,
       "include_in_standard": true
