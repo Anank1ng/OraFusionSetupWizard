@@ -14,7 +14,7 @@ from services.ui_helpers import render_connection_form
 
 st.set_page_config(page_title="IO Update Builder", page_icon="🛠️", layout="wide")
 st.title("🛠️ IO Update Builder")
-st.caption("Patch v2.7 — Organization Usage memakai REST field DefaultSupplySubinventory & DefaultCompletionSubinventory untuk plantParameters.")
+st.caption("Patch v2.8 — Organization Usage/plantParameters memakai REST fields, legacy DefSupplySubinv tidak dikirim.")
 
 PARAM_MAPPING_BASE = load_schema("io_parameters_update")
 USAGE_MAPPING_BASE = load_schema("organization_usage_update")
