@@ -14,14 +14,14 @@ from services.ui_helpers import render_connection_form
 
 st.set_page_config(page_title="IO Update Builder", page_icon="🛠️", layout="wide")
 st.title("🛠️ IO Update Builder")
-st.caption("Patch v2.6 — Organization Usage menambahkan DefSupplySubinv & DefCompltnSubinv untuk create plantParameters Manufacturing/Maintenance.")
+st.caption("Patch v2.7 — Organization Usage memakai REST field DefaultSupplySubinventory & DefaultCompletionSubinventory untuk plantParameters.")
 
 PARAM_MAPPING_BASE = load_schema("io_parameters_update")
 USAGE_MAPPING_BASE = load_schema("organization_usage_update")
 
 st.info(
     "Gunakan page ini untuk fetch existing IO dari Oracle, pilih sampai 50 IO, lalu generate template update berbasis current value. "
-    "Pilih **IO Parameters** untuk child invOrgParameters, atau **Organization Usage** untuk parent inventoryOrganizations. Jika memilih Manufacturing/Maintenance, isi ManufacturingCalendarId serta DefSupplySubinv dan DefCompltnSubinv. Calendar bisa fallback dari invOrgParameters.ScheduleId saat live run."
+    "Pilih **IO Parameters** untuk child invOrgParameters, atau **Organization Usage** untuk parent inventoryOrganizations. Jika memilih Manufacturing/Maintenance, isi ManufacturingCalendarId serta DefaultSupplySubinventory dan DefaultCompletionSubinventory. Calendar bisa fallback dari invOrgParameters.ScheduleId saat live run."
 )
 
 PARAM_ROUTE_COLUMNS = ["OrganizationCode", "OrganizationId", "OrganizationId2"]
