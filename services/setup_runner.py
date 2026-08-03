@@ -333,6 +333,36 @@ def _resolve_subinventory_code(row: pd.Series, candidates: List[str], label: str
     return value
 
 
+
+
+def _normalize_plant_parameters_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Force public REST field names for plantParameters.
+
+    Oracle error messages may mention internal EO names like DefSupplySubinv/DefCompltnSubinv,
+    but the REST API payload must use DefaultSupplySubinventory and
+    DefaultCompletionSubinventory. This normalizer also protects live runs if an older
+    custom mapping/template still produced the legacy keys.
+    """
+    normalized = dict(payload)
+
+    if "DefSupplySubinv" in normalized and is_blank(normalized.get("DefaultSupplySubinventory")):
+        normalized["DefaultSupplySubinventory"] = normalized.get("DefSupplySubinv")
+    if "DefCompltnSubinv" in normalized and is_blank(normalized.get("DefaultCompletionSubinventory")):
+        normalized["DefaultCompletionSubinventory"] = normalized.get("DefCompltnSubinv")
+
+    # Never send internal/legacy EO field names to the public REST endpoint.
+    normalized.pop("DefSupplySubinv", None)
+    normalized.pop("DefCompltnSubinv", None)
+
+    required = ["ManufacturingCalendarId", "DefaultSupplySubinventory", "DefaultCompletionSubinventory"]
+    missing = [key for key in required if key not in normalized or is_blank(normalized.get(key))]
+    if missing:
+        raise PayloadBuildError(
+            "plantParameters payload belum lengkap. Wajib isi: " + ", ".join(missing)
+        )
+
+    return normalized
+
 def _plant_payload_from_row(row: pd.Series, org_id: int, client: Optional[OracleFusionClient], dry_run: bool) -> Dict[str, Any]:
     calendar_id = _resolve_manufacturing_calendar_id(row, org_id, client, dry_run)
     if calendar_id is None:
@@ -378,7 +408,7 @@ def _plant_payload_from_row(row: pd.Series, org_id: int, client: Optional[Oracle
             if col == "EnableProcessManufacturingFlag":
                 val = parse_bool(val)
             payload[payload_key] = val
-    return payload
+    return _normalize_plant_parameters_payload(payload)
 
 
 def ensure_plant_parameters_for_usage(
@@ -392,7 +422,7 @@ def ensure_plant_parameters_for_usage(
     Oracle may accept PATCH on the parent inventory organization with HTTP 200, but the UI checkbox
     won't actually turn on unless the related child plantParameters row exists.
     """
-    plant_payload = _plant_payload_from_row(row, org_id, client, dry_run)
+    plant_payload = _normalize_plant_parameters_payload(_plant_payload_from_row(row, org_id, client, dry_run))
     collection_endpoint = f"/fscmRestApi/resources/11.13.18.05/inventoryOrganizations/{org_id}/child/plantParameters"
 
     if dry_run:
