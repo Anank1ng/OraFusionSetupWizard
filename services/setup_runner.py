@@ -468,6 +468,30 @@ def ensure_plant_parameters_for_usage(
         "response_body": post_resp.body,
     }
 
+def _usage_patch_verified(row: pd.Series, response_body: Any, needs_plant_parameters: bool) -> tuple[bool, str]:
+    """Validate Oracle response because Fusion can return HTTP 200 while ignoring usage flags.
+
+    For Organization Usage, especially ManufacturingPlantFlag/MaintenanceEnabledFlag,
+    a 200 response is not enough. We check whether the returned flags actually became true.
+    """
+    if not needs_plant_parameters or not isinstance(response_body, dict):
+        return True, ""
+
+    problems: List[str] = []
+
+    if _row_bool(row, "ManufacturingPlantFlag") and response_body.get("ManufacturingPlantFlag") is not True:
+        problems.append("ManufacturingPlantFlag masih false di response Oracle")
+
+    if _row_bool(row, "MaintenanceEnabledFlag") and response_body.get("MaintenanceEnabledFlag") is not True:
+        problems.append("MaintenanceEnabledFlag masih false di response Oracle")
+
+    # Oracle usually returns this as string, not boolean. Treat only true/TRUE as verified.
+    if problems and str(response_body.get("ManufacturingParametersExistFlag", "")).lower() != "true":
+        problems.append("ManufacturingParametersExistFlag masih belum true")
+
+    return (len(problems) == 0, "; ".join(problems))
+
+
 def run_patch_organization_usage(
     df: pd.DataFrame,
     mapping: Dict[str, Any],
@@ -475,7 +499,13 @@ def run_patch_organization_usage(
     config: RunnerConfig,
     org_map: Dict[str, int],
 ) -> pd.DataFrame:
-    """PATCH parent inventoryOrganizations/{OrganizationId} for Additional Usages style fields."""
+    """PATCH parent inventoryOrganizations/{OrganizationId} for Additional Usages style fields.
+
+    v2.9 change:
+    When ManufacturingPlantFlag or MaintenanceEnabledFlag is TRUE, send plantParameters
+    nested in the same parent PATCH payload. Separate child POST can fail because Fusion
+    still sees the organization as not enabled for manufacturing/maintenance.
+    """
     logs: List[Dict[str, Any]] = []
     for i, row in df.iterrows():
         org_code = str(row.get("OrganizationCode", "")).strip()
@@ -485,34 +515,63 @@ def run_patch_organization_usage(
             if org_id is None:
                 raise PayloadBuildError("OrganizationId tidak ditemukan. Isi OrganizationId atau pastikan OrganizationCode berhasil dibuat/ditemukan.")
             row["OrganizationId"] = org_id
-            payload = build_payload_from_row(row, mapping)
+
+            parent_payload = build_payload_from_row(row, mapping)
             endpoint = mapping["endpoint_template"].format(OrganizationId=org_id)
-            plant_result = None
             needs_plant_parameters = _row_bool(row, "ManufacturingPlantFlag") or _row_bool(row, "MaintenanceEnabledFlag")
+
+            plant_result = None
+            payload_to_send = dict(parent_payload)
+
+            if needs_plant_parameters:
+                plant_payload = _plant_payload_from_row(row, org_id, client, config.dry_run)
+                payload_to_send["plantParameters"] = [plant_payload]
+                plant_result = {
+                    "action": "nested_plantParameters_in_parent_patch",
+                    "success": None,
+                    "status_code": None,
+                    "endpoint": endpoint,
+                    "request_payload": plant_payload,
+                    "response_body": None,
+                }
 
             if config.dry_run:
                 ok = True
                 status_code = 0
-                response_body = {"dry_run": True, "message": "Dry run only"}
-                if needs_plant_parameters:
-                    plant_result = ensure_plant_parameters_for_usage(row, org_id, client, config.dry_run)
+                response_body = {
+                    "dry_run": True,
+                    "message": "Dry run only",
+                    "note": "v2.9 uses nested plantParameters in parent PATCH when manufacturing/maintenance is enabled.",
+                }
+                if plant_result:
+                    plant_result["success"] = True
+                    plant_result["status_code"] = 0
+                    plant_result["response_body"] = response_body
             else:
                 if client is None:
                     raise RuntimeError("Client Oracle belum tersedia")
-                resp = client.patch(endpoint, payload)
-                ok = resp.ok
+                resp = client.patch(endpoint, payload_to_send)
                 status_code = resp.status_code
                 response_body = resp.body
-                if ok and needs_plant_parameters:
-                    plant_result = ensure_plant_parameters_for_usage(row, org_id, client, config.dry_run)
-                    ok = bool(ok and plant_result.get("success"))
+                verified, verify_message = _usage_patch_verified(row, response_body, needs_plant_parameters)
+                ok = bool(resp.ok and verified)
+                if plant_result:
+                    plant_result["success"] = ok
+                    plant_result["status_code"] = status_code
+                    plant_result["response_body"] = response_body
+                    if verify_message:
+                        plant_result["verify_message"] = verify_message
 
             message = "OK" if ok else _body_to_text(response_body)
             if plant_result:
                 if plant_result.get("success"):
-                    message = f"{message}; plantParameters: {plant_result.get('action')} OK"
+                    message = f"{message}; plantParameters: nested PATCH OK"
                 else:
-                    message = f"{message}; plantParameters FAILED: {_body_to_text(plant_result.get('response_body'))}"
+                    verify_msg = plant_result.get("verify_message")
+                    if verify_msg:
+                        message = f"{message}; nested plantParameters belum terverifikasi: {verify_msg}"
+                    else:
+                        message = f"{message}; nested plantParameters FAILED: {_body_to_text(plant_result.get('response_body'))}"
 
             logs.append({
                 "step": "Patch Organization Usage",
@@ -522,7 +581,8 @@ def run_patch_organization_usage(
                 "status_code": status_code,
                 "OrganizationId": org_id,
                 "endpoint": endpoint,
-                "request_payload": payload,
+                "request_payload": payload_to_send,
+                "parent_usage_payload": parent_payload,
                 "response_body": response_body,
                 "plant_parameters_action": plant_result.get("action") if plant_result else None,
                 "plant_parameters_status_code": plant_result.get("status_code") if plant_result else None,
