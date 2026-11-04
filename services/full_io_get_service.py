@@ -174,6 +174,60 @@ def compare_parameters(source: Dict[str, Any], target: Dict[str, Any]) -> pd.Dat
     return pd.DataFrame(rows)
 
 
+
+def _copy_value_available(value: Any) -> bool:
+    """False and zero are valid PATCH values; absent/blank values are not."""
+    if value is None or isinstance(value, (dict, list)):
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    try:
+        return not bool(pd.isna(value))
+    except (TypeError, ValueError):
+        return False
+
+
+def _display_parameter_value(value: Any) -> str:
+    if not _copy_value_available(value):
+        return "—"
+    if isinstance(value, bool):
+        return "True" if value else "False"
+    return str(value)
+
+
+def compare_copyable_parameters(
+    source: Dict[str, Any],
+    target: Dict[str, Any],
+    base_mapping: Dict[str, Any],
+) -> pd.DataFrame:
+    """Only show PATCH-mapped child fields with a usable source value.
+
+    Preserve typed values in the source snapshot for build_copy_patch().
+    These strings are UI display values only, never sent to Oracle.
+    """
+    columns = ["Field", "Parameter", "Section", "Reference Value", "Target Value", "Status"]
+    source_params = first_parameter(source)
+    target_params = first_parameter(target)
+    rows = []
+    for field in base_mapping.get("fields") or []:
+        column = field.get("excel_column")
+        if not column or not field.get("send_to_payload", True):
+            continue
+        if column not in source_params or not _copy_value_available(source_params[column]):
+            continue
+        src_value = source_params[column]
+        dst_value = target_params.get(column)
+        rows.append({
+            "Field": column,
+            "Parameter": field.get("label") or column,
+            "Section": field.get("section") or "General",
+            "Reference Value": _display_parameter_value(src_value),
+            "Target Value": _display_parameter_value(dst_value),
+            "Status": "Same" if src_value == dst_value else "Different",
+        })
+    return pd.DataFrame(rows, columns=columns)
+
+
 def build_copy_patch(
     source: Dict[str, Any],
     target: Dict[str, Any],
@@ -193,12 +247,15 @@ def build_copy_patch(
         for f in fields
         if f.get("excel_column") and f.get("send_to_payload", True)
     }
-    requested = [x for x in selected_columns if x in approved]
+    requested = list(dict.fromkeys(selected_columns))
     if not requested:
         raise ValueError("Pilih minimal satu field parameter yang akan dicopy.")
-    missing = [col for col in requested if col not in source_params]
+    invalid = [col for col in requested if col not in approved]
+    if invalid:
+        raise ValueError("Field ini bukan parameter yang boleh di-PATCH: " + ", ".join(invalid))
+    missing = [col for col in requested if not _copy_value_available(source_params.get(col))]
     if missing:
-        raise ValueError("Field ini tidak tersedia dari GET IO referensi: " + ", ".join(missing))
+        raise ValueError("Field ini kosong/tidak tersedia dari GET IO referensi: " + ", ".join(missing))
 
     route_keys = ("OrganizationCode", "OrganizationId", "OrganizationId2")
     chosen_set = set(requested) | set(route_keys)
