@@ -23,8 +23,7 @@ def is_missing(value: Any) -> bool:
     if isinstance(value, str):
         return not value.strip()
     try:
-        result = pd.isna(value)
-        return bool(result) if isinstance(result, (bool, type(pd.NA))) else False
+        return bool(pd.isna(value))
     except (TypeError, ValueError):
         return False
 
@@ -153,3 +152,28 @@ def nullable_checkbox_value(value: Any) -> bool | None:
 def clean_editor_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """Use Python None for nullable Excel exports and PATCH payload validation."""
     return df.astype(object).where(pd.notna(df), None)
+
+
+def preserve_untouched_blank_booleans(
+    original: pd.DataFrame,
+    edited: pd.DataFrame,
+    mapping: Dict[str, Any],
+    editor_state: Dict[str, Any] | None,
+) -> pd.DataFrame:
+    """Protect absent Oracle booleans even if a frontend renders null as unchecked.
+
+    A user can still explicitly set False: the change must appear in the
+    data_editor edited_rows delta.
+    """
+    result = edited.copy().astype(object)
+    delta = (editor_state or {}).get("edited_rows") or {}
+    boolean_cols = [
+        f.get("excel_column") for f in mapping.get("fields") or []
+        if f.get("type") == "boolean" and f.get("excel_column") in original.columns
+    ]
+    for position, index in enumerate(original.index):
+        changes = delta.get(position, delta.get(str(position), {}))
+        for col in boolean_cols:
+            if is_missing(original.at[index, col]) and col not in changes:
+                result.at[index, col] = None
+    return clean_editor_dataframe(result)
