@@ -81,7 +81,7 @@ def _filter_org_df(df: pd.DataFrame, keyword: str) -> pd.DataFrame:
         return df
     mask = pd.Series(False, index=df.index)
     for col in cols:
-        mask = mask | df[col].astype(str).str.lower().str.contains(keyword, na=False)
+        mask = mask | df[col].astype(str).str.lower().str.contains(keyword, na=False, regex=False)
     return df[mask]
 
 
@@ -177,18 +177,26 @@ def _render_parameter_selector(mapping: Dict[str, Any]) -> List[str]:
 
     st.write("**Pilih field parameter yang ingin disertakan di template PATCH**")
     p1, p2, p3, p4 = st.columns(4)
-    if p1.button("Minimal", use_container_width=True):
-        st.session_state["param_builder_selected_payload"] = _selected_columns_from_preset(mapping, "minimal")
-        st.rerun()
-    if p2.button("Standard", use_container_width=True):
-        st.session_state["param_builder_selected_payload"] = _selected_columns_from_preset(mapping, "standard")
-        st.rerun()
-    if p3.button("All fields", use_container_width=True):
-        st.session_state["param_builder_selected_payload"] = _selected_columns_from_preset(mapping, "all")
-        st.rerun()
-    if p4.button("Clear optional", use_container_width=True):
-        st.session_state["param_builder_selected_payload"] = [c for c in ROUTE_COLUMNS]
-        st.rerun()
+    preset_buttons = {
+        "minimal": p1.button("Minimal", use_container_width=True),
+        "standard": p2.button("Standard", use_container_width=True),
+        "all": p3.button("All fields", use_container_width=True),
+        "clear": p4.button("Clear optional", use_container_width=True),
+    }
+    for preset, clicked in preset_buttons.items():
+        if clicked:
+            chosen = (
+                set(ROUTE_COLUMNS) if preset == "clear"
+                else set(_selected_columns_from_preset(mapping, preset))
+            )
+            st.session_state["param_builder_selected_payload"] = list(chosen)
+            # Streamlit checkbox keys persist across reruns. Update them with the
+            # preset, otherwise visually checked values can contradict selection.
+            for field in payload_fields:
+                col = field.get("excel_column")
+                if col:
+                    st.session_state[f"param_field_{col}"] = col in chosen
+            st.rerun()
 
     selected = set(st.session_state.get("param_builder_selected_payload", []))
     selected.update(ROUTE_COLUMNS)
