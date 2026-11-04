@@ -6,6 +6,7 @@ import pytest
 from services.io_parameter_reference import (
     build_reference_template,
     child_parameter_key,
+    missing_child_key_warnings,
     clean_editor_dataframe,
     is_missing,
     nullable_checkbox_value,
@@ -76,21 +77,34 @@ def test_reference_template_supports_multiple_selected_io_rows_without_mixup():
     assert df["ScheduleId"].tolist() == [123, 777]
 
 
-def test_missing_child_key_or_get_error_block_excel_and_no_parent_fallback():
+def test_missing_child_key_yields_excel_warning_but_failed_get_still_blocks():
     missing = _entry(params={"ScheduleId": 234})
     assert child_parameter_key(missing["params"]) == ""
-    errors = validate_reference_rows([missing])
-    assert any("child key" in error for error in errors)
-    with pytest.raises(ValueError, match="diblokir"):
-        build_reference_template([missing], MAPPING)
+    assert validate_reference_rows([missing]) == []
+    assert missing_child_key_warnings([missing])
+    template = build_reference_template([missing], MAPPING)
+    assert template.loc[0, "OrganizationId2"] == ""
+    assert template.loc[0, "ScheduleId"] == 234
 
     failed = _entry(code="IO106", org_id=106, params={}, error="HTTP 403 Forbidden")
     assert any("403" in issue for issue in validate_reference_rows([failed]))
     with pytest.raises(ValueError):
         build_reference_template([_entry(), failed], MAPPING)
 
-    table = reference_status_table([_entry(), failed], MAPPING)
-    assert table["GET Status"].tolist() == ["OK", "ERROR"]
+    table = reference_status_table([missing, failed], MAPPING)
+    assert table["GET Status"].tolist() == ["KEY PENDING", "ERROR"]
+
+
+def test_child_key_uses_parent_matching_oracle_self_link_only():
+    source = {"links": [{
+        "rel": "self",
+        "href": "https://example.oraclecloud.com/fscmRestApi/resources/11.13.18.05/inventoryOrganizations/105/child/invOrgParameters/999001?foo=bar"
+    }]}
+    assert child_parameter_key(source, 105) == "999001"
+    assert child_parameter_key(source, 106) == ""
+    source["links"][0]["href"] = "https://example.com/inventoryOrganizations/105/child/invOrgParameters"
+    assert child_parameter_key(source, 105) == ""
+    assert child_parameter_key({"OrganizationId": 105}, 105) == ""
 
 
 def test_blank_values_remain_blank_and_false_zero_are_not_missing():

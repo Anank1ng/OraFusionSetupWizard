@@ -12,6 +12,7 @@ from services.io_parameter_reference import (
     build_reference_template,
     clean_editor_dataframe,
     nullable_checkbox_value,
+    missing_child_key_warnings,
     preserve_untouched_blank_booleans,
     reference_status_table,
     selection_signature,
@@ -433,6 +434,15 @@ if has_current_get:
     status_table = reference_status_table(stored_rows, selected_mapping)
     st.dataframe(status_table, use_container_width=True, hide_index=True)
     blocked = validate_reference_rows(stored_rows)
+    pending_keys = missing_child_key_warnings(stored_rows)
+    if pending_keys:
+        st.warning(
+            "Child key sebagian IO belum terverifikasi. Excel tetap bisa diunduh "
+            "dengan OrganizationId2 kosong. Saat live PATCH, Setup Runner akan "
+            "GET ulang dan berhenti jika key tetap tidak dapat ditentukan."
+        )
+        for message in pending_keys[:5]:
+            st.caption(message)
     if blocked:
         st.error(
             "Download template hasil Oracle dinonaktifkan karena data GET belum lengkap "

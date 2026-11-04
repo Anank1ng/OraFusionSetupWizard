@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 
 from services.oracle_client import OracleFusionClient, OracleResponse
+from services.io_parameter_reference import child_parameter_key, is_missing
 
 REFERENCE_COLLECTIONS: Dict[str, Dict[str, Any]] = {
     "Business Units": {
@@ -100,9 +101,43 @@ def fetch_inventory_orgs(client: OracleFusionClient, limit: int = 60, q_filter: 
 
 
 def fetch_inv_org_parameters(client: OracleFusionClient, organization_id: int) -> tuple[pd.DataFrame, OracleResponse]:
+    """GET data plus Oracle-generated item links needed for PATCH routing.
+
+    Never infer a child key from a parent attribute without confirming a
+    successful child item GET. A blank unresolved key is allowed in the Excel
+    template; the live runner must resolve it or fail before PATCH.
+    """
     endpoint = f"/fscmRestApi/resources/11.13.18.05/inventoryOrganizations/{organization_id}/child/invOrgParameters"
-    response = client.get(endpoint, params={"onlyData": "true", "limit": 10})
-    return pd.DataFrame(extract_items(response.body)), response
+    response = client.get(endpoint, params={"onlyData": "false", "limit": 10})
+    if not response.ok:
+        return pd.DataFrame(), response
+    items = extract_items(response.body)
+    for item in items:
+        key = child_parameter_key(item, organization_id)
+        if not is_missing(key):
+            if is_missing(item.get("OrganizationId2")):
+                item["OrganizationId2"] = key
+                item["_ChildKeySource"] = "Oracle item self/canonical link"
+            else:
+                item["_ChildKeySource"] = "Oracle field"
+    # Some Oracle configurations suppress item links. Before giving up,
+    # probe a *read-only* single-item URL using the parent ID as a candidate.
+    # Only an actual HTTP 200 child response confirms this candidate is usable.
+    if len(items) == 1 and is_missing(child_parameter_key(items[0], organization_id)):
+        candidate = str(organization_id)
+        try:
+            item_response = client.get(
+                f"{endpoint}/{candidate}", params={"onlyData": "false"}
+            )
+            body = item_response.body
+            if item_response.ok and isinstance(body, dict):
+                returned_org = body.get("OrganizationId")
+                if is_missing(returned_org) or str(returned_org) == candidate:
+                    items[0]["OrganizationId2"] = candidate
+                    items[0]["_ChildKeySource"] = "Verified by child-item GET"
+        except Exception:
+            pass  # A failed read-only probe must never be promoted to a key.
+    return pd.DataFrame(items), response
 
 
 def organization_lookup_from_reference(df: pd.DataFrame) -> Dict[str, int]:
