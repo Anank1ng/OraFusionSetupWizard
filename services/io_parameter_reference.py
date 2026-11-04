@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+from urllib.parse import unquote, urlsplit
 from typing import Any, Dict, List, Sequence
 
 import pandas as pd
@@ -28,13 +30,49 @@ def is_missing(value: Any) -> bool:
         return False
 
 
-def child_parameter_key(parameters: Dict[str, Any]) -> Any:
-    """Use only keys returned by GET; never guess from the parent IO ID."""
-    for key in CHILD_KEY_COLUMNS:
-        value = parameters.get(key)
+def child_parameter_key(parameters: Dict[str, Any], organization_id: Any = None) -> Any:
+    """Resolve the PATCH child ID from Oracle fields or an item self/canonical link.
+
+    OrganizationId from the item is *not* automatically OrganizationId2.
+    In some instances Oracle returns the child key only in the item URL.
+    """
+    for name in CHILD_KEY_COLUMNS:
+        value = parameters.get(name)
         if not is_missing(value):
             return value
+
+    expected_parent = str(organization_id) if not is_missing(organization_id) else None
+    for link in parameters.get("links") or []:
+        if not isinstance(link, dict) or link.get("rel") not in ("self", "canonical"):
+            continue
+        href = link.get("href")
+        if not isinstance(href, str):
+            continue
+        path = unquote(urlsplit(href).path).rstrip("/")
+        # Avoid confusing a collection link, a child flexfield link, or another org.
+        match = re.search(
+            r"/inventoryOrganizations/(\\d+)/child/invOrgParameters/(\\d+)$", path
+        )
+        if match and (expected_parent is None or match.group(1) == expected_parent):
+            return match.group(2)
     return ""
+
+
+def missing_child_key_warnings(rows: Sequence[Dict[str, Any]]) -> List[str]:
+    """Missing key is a warning for Excel; live Runner must independently resolve it."""
+    warnings = []
+    for entry in rows:
+        org = entry.get("org") or {}
+        params = entry.get("params") or {}
+        if not entry.get("error") and params and is_missing(
+            child_parameter_key(params, org.get("OrganizationId"))
+        ):
+            warnings.append(
+                f"{org.get('OrganizationCode') or org.get('OrganizationId')}: "
+                "child key belum tersedia; Excel akan mengosongkan OrganizationId2, "
+                "Setup Runner wajib GET ulang dan gagal aman jika key tetap tidak ditemukan."
+            )
+    return warnings
 
 
 def selection_signature(
@@ -55,7 +93,7 @@ def selection_signature(
 
 
 def validate_reference_rows(rows: Sequence[Dict[str, Any]]) -> List[str]:
-    """Hard blockers: failed GET, missing parent route keys, or missing child key."""
+    """Hard blockers: failed GET or missing parent identity/parameter data."""
     errors = []
     for row in rows:
         org = row.get("org") or {}
@@ -68,8 +106,6 @@ def validate_reference_rows(rows: Sequence[Dict[str, Any]]) -> List[str]:
             errors.append(f"{code}: OrganizationCode / OrganizationId tidak ditemukan dalam GET.")
         elif not params:
             errors.append(f"{code}: GET invOrgParameters tidak menghasilkan data.")
-        elif is_missing(child_parameter_key(params)):
-            errors.append(f"{code}: child key OrganizationId2 tidak ditemukan dalam GET.")
     return errors
 
 
@@ -99,7 +135,7 @@ def build_reference_template(
             elif col == "OrganizationId":
                 value = org.get(col)
             elif col == "OrganizationId2":
-                value = child_parameter_key(params)
+                value = child_parameter_key(params, org.get("OrganizationId"))
             else:
                 value = params.get(col)
                 if is_missing(value):
@@ -130,11 +166,22 @@ def reference_status_table(
             "OrganizationCode": org.get("OrganizationCode") or "",
             "OrganizationName": org.get("OrganizationName") or "",
             "OrganizationId": org.get("OrganizationId") or "",
-            "OrganizationId2": child_parameter_key(params),
-            "GET Status": "ERROR" if entry_errors else "OK",
+            "OrganizationId2": child_parameter_key(params, org.get("OrganizationId")),
+            "GET Status": (
+                "ERROR" if entry_errors else
+                "KEY PENDING" if is_missing(child_parameter_key(params, org.get("OrganizationId"))) else
+                "OK"
+            ),
+            "Key Source": params.get("_ChildKeySource") or (
+                "not resolved" if is_missing(child_parameter_key(params, org.get("OrganizationId")))
+                else "Oracle GET"
+            ),
             "Field berisi nilai": len(payload_fields) - len(missing),
             "Field kosong/tidak tersedia": len(missing),
             "Detail": entry_errors[0] if entry_errors else (
+                "Child key belum terverifikasi; Runner akan GET ulang. "
+                if is_missing(child_parameter_key(params, org.get("OrganizationId"))) else ""
+            ) + (
                 ", ".join(missing[:8]) + (" ..." if len(missing) > 8 else "")
                 if missing else "Semua field terpilih punya nilai"
             ),
