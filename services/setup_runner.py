@@ -8,6 +8,7 @@ import pandas as pd
 from services.oracle_client import OracleFusionClient
 from services.payload_builder import PayloadBuildError, build_payload_from_row, is_blank
 from services.reference_service import fetch_inv_org_parameters
+from services.io_parameter_reference import child_parameter_key, is_missing
 
 
 @dataclass
@@ -168,27 +169,31 @@ def run_create_subinventories(
     return pd.DataFrame(logs)
 
 
-def resolve_inv_org_parameter_id(row: pd.Series, org_id: int, client: Optional[OracleFusionClient], dry_run: bool) -> Optional[int]:
+def resolve_inv_org_parameter_id(
+    row: pd.Series, org_id: int, client: Optional[OracleFusionClient], dry_run: bool
+) -> int | str | None:
+    """Resolve key from a verified GET, not the parent OrganizationId."""
     if "OrganizationId2" in row and not is_blank(row.get("OrganizationId2")):
         try:
             return int(row.get("OrganizationId2"))
-        except Exception:
+        except (TypeError, ValueError):
             return None
     if dry_run:
-        return int(org_id)
+        # Informational placeholder only; no PATCH is sent in dry-run mode.
+        return "RESOLVE_ON_LIVE_GET"
     if client is None:
         return None
-    df, _ = fetch_inv_org_parameters(client, int(org_id))
-    if df.empty:
+    df, response = fetch_inv_org_parameters(client, int(org_id))
+    if not response.ok or df.empty:
         return None
-    first = df.iloc[0]
-    for candidate in ["OrganizationId2", "OrganizationId", "OrgParameterId"]:
-        if candidate in df.columns and not is_blank(first.get(candidate)):
-            try:
-                return int(first.get(candidate))
-            except Exception:
-                pass
-    return int(org_id)
+    first = df.iloc[0].to_dict()
+    key = child_parameter_key(first, org_id)
+    if is_missing(key):
+        return None
+    try:
+        return int(key)
+    except (TypeError, ValueError):
+        return None
 
 
 def run_patch_io_parameters(
@@ -209,7 +214,7 @@ def run_patch_io_parameters(
             row["OrganizationId"] = org_id
             org_id2 = resolve_inv_org_parameter_id(row, org_id, client, config.dry_run)
             if org_id2 is None:
-                raise PayloadBuildError("OrganizationId2 / invOrgParameters key tidak ditemukan. GET child invOrgParameters gagal/kosong.")
+                raise PayloadBuildError("OrganizationId2 / invOrgParameters key tidak ditemukan. GET child invOrgParameters gagal atau key item tidak berhasil diverifikasi. Periksa GET item links pada instance.")
             row["OrganizationId2"] = org_id2
             payload = build_payload_from_row(row, mapping)
             endpoint = mapping["endpoint_template"].format(OrganizationId=org_id, OrganizationId2=org_id2)
