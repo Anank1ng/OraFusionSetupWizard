@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 from services.full_io_get_service import (
     fetch_organizations, fetch_full_io, compare_parameters,
-    build_copy_patch, snapshots_to_dataframes,
+    build_copy_patch, snapshots_to_dataframes, compare_copyable_parameters,
 )
 
 
@@ -73,3 +73,75 @@ def test_copy_template_only_selected_values():
     assert df.loc[0, 'ScheduleId'] == 123
     assert 'AllowNegativeOnhandTransactionsFlag' not in df.columns
     assert len(filtered['fields']) == 4
+
+
+def _demo_mapping():
+    return {"fields": [
+        {"excel_column": "OrganizationCode", "send_to_payload": False},
+        {"excel_column": "OrganizationId", "send_to_payload": False},
+        {"excel_column": "OrganizationId2", "send_to_payload": False},
+        {"excel_column": "SerialNumberType", "label": "Serial Type", "send_to_payload": True, "type": "string", "payload_path": "SerialNumberType"},
+        {"excel_column": "AllowNegativeOnhandTransactionsFlag", "send_to_payload": True, "type": "boolean", "payload_path": "AllowNegativeOnhandTransactionsFlag"},
+        {"excel_column": "ScheduleId", "send_to_payload": True, "type": "integer", "payload_path": "ScheduleId"},
+        {"excel_column": "AutoLotAlphaPrefix", "send_to_payload": True, "type": "string", "payload_path": "AutoLotAlphaPrefix"},
+        {"excel_column": "ReadOnlyField", "send_to_payload": False},
+    ]}
+
+
+def test_compare_copyable_only_mapped_nonempty_fields():
+    source = {
+        "parent": {"OrganizationId": 1, "OrganizationCode": "SRC"},
+        "inventory_parameters": [{
+            "SerialNumberType": "1", "AllowNegativeOnhandTransactionsFlag": False,
+            "ScheduleId": 0, "AutoLotAlphaPrefix": None,
+            "ReadOnlyField": "internal", "UnmappedField": "not safe",
+        }],
+    }
+    target = {
+        "parent": {"OrganizationId": 2, "OrganizationCode": "DST"},
+        "inventory_parameters": [{
+            "OrganizationId2": 876, "SerialNumberType": "2",
+            "AllowNegativeOnhandTransactionsFlag": True, "ScheduleId": 0,
+        }],
+    }
+    table = compare_copyable_parameters(source, target, _demo_mapping())
+    assert table["Field"].tolist() == [
+        "SerialNumberType", "AllowNegativeOnhandTransactionsFlag", "ScheduleId",
+    ]
+    assert table["Status"].tolist() == ["Different", "Different", "Same"]
+    assert table.loc[1, "Reference Value"] == "False"
+    assert table.loc[2, "Reference Value"] == "0"
+
+
+def test_copy_rejects_unmapped_and_missing_values_and_keeps_false():
+    source = {
+        "parent": {"OrganizationId": 1, "OrganizationCode": "SRC"},
+        "inventory_parameters": [{
+            "AllowNegativeOnhandTransactionsFlag": False,
+            "ScheduleId": 0, "AutoLotAlphaPrefix": None,
+            "ReadOnlyField": "internal",
+        }],
+    }
+    target = {
+        "parent": {"OrganizationId": 2, "OrganizationCode": "DST"},
+        "inventory_parameters": [{"OrganizationId2": 876}],
+    }
+    mapping = _demo_mapping()
+    df, filtered = build_copy_patch(
+        source, target, mapping, ["AllowNegativeOnhandTransactionsFlag", "ScheduleId"]
+    )
+    assert df.loc[0, "OrganizationId"] == 2
+    assert df.loc[0, "OrganizationId2"] == 876
+    assert df.loc[0, "AllowNegativeOnhandTransactionsFlag"] == False
+    assert df.loc[0, "ScheduleId"] == 0
+    assert "ReadOnlyField" not in df.columns
+    assert {field["excel_column"] for field in filtered["fields"]} == {
+        "OrganizationCode", "OrganizationId", "OrganizationId2",
+        "AllowNegativeOnhandTransactionsFlag", "ScheduleId",
+    }
+
+    import pytest
+    with pytest.raises(ValueError, match="bukan parameter"):
+        build_copy_patch(source, target, mapping, ["ReadOnlyField"])
+    with pytest.raises(ValueError, match="kosong/tidak tersedia"):
+        build_copy_patch(source, target, mapping, ["AutoLotAlphaPrefix"])
