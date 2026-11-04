@@ -14,6 +14,7 @@ from services.excel_service import make_json_bytes, make_template_excel_bytes
 from services.full_io_get_service import (
     build_copy_patch,
     compare_parameters,
+    compare_copyable_parameters,
     dataframe_book_bytes,
     fetch_full_io,
     fetch_organizations,
@@ -172,56 +173,134 @@ if snapshots:
             target_id = st.selectbox("Target IO (yang ingin di-PATCH)", target_ids, format_func=lambda x: names[x], key="full_target")
         source = by_id[source_id]
         target = by_id[target_id]
-        compare_df = compare_parameters(source, target)
-        only_diff = st.checkbox("Tampilkan field yang berbeda saja", value=False)
-        if only_diff and not compare_df.empty:
-            compare_df = compare_df[~compare_df["Same"]]
-        st.dataframe(compare_df, use_container_width=True, hide_index=True)
 
-        supported = {
-            f["excel_column"]: f
-            for f in BASE_MAPPING.get("fields", [])
-            if f.get("send_to_payload", True) and f.get("excel_column")
-        }
-        source_params = first_parameter(source)
-        options = [col for col in supported if col in source_params and source_params[col] is not None]
-        selected_fields = st.multiselect(
-            "Pilih field yang nilainya akan disalin dari IO referensi",
-            options,
-            format_func=lambda col: f"{supported[col].get('label', col)} · {col}",
-            help="Tidak otomatis memilih semua. Hanya field yang kamu pilih masuk template PATCH.",
+        # Keep choices tied to the actual IO pair (and fetched snapshot batch).
+        # If the user changes either IO, prior selections cannot leak into the new PATCH.
+        selection_pair = (source_id, target_id, id(snapshots))
+        if st.session_state.get("full_copy_pair") != selection_pair:
+            st.session_state["full_copy_pair"] = selection_pair
+            st.session_state["full_copy_selected"] = []
+
+        st.markdown("#### Compare & Copy IO Parameters")
+        st.caption(
+            "Centang **Copy** pada parameter yang ingin disalin dari Reference IO ke Target IO. "
+            "Tabel hanya memuat field invOrgParameters yang ada dalam mapping PATCH dan "
+            "mempunyai nilai referensi. False dan 0 tetap dianggap nilai yang valid."
         )
-        if selected_fields:
-            try:
-                template_df, mapping = build_copy_patch(source, target, BASE_MAPPING, selected_fields)
-                st.warning(
-                    "Periksa kembali nilainya. Copy dari IO existing bukan jaminan semua konfigurasi "
-                    "bisa diterapkan pada IO target. Klik Test Selected Row di Setup Runner terlebih dahulu."
-                )
-                st.dataframe(template_df, hide_index=True, use_container_width=True)
-                payload = build_payload_from_row(template_df.iloc[0], mapping)
-                with st.expander("Preview PATCH payload yang akan dibentuk", expanded=True):
-                    st.json(payload)
-                p1, p2 = st.columns(2)
-                with p1:
-                    st.download_button(
-                        "Download PATCH Excel Template",
-                        data=make_template_excel_bytes(mapping, template_df=template_df, sheet_name="IO_Parameters_Update"),
-                        file_name="io_parameters_patch_from_reference.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True,
-                    )
-                with p2:
-                    st.download_button(
-                        "Download PATCH Mapping JSON",
-                        data=make_json_bytes(mapping),
-                        file_name="io_parameters_patch_from_reference_mapping.json",
-                        mime="application/json",
-                        use_container_width=True,
-                    )
-            except Exception as exc:
-                st.error(f"Template PATCH belum bisa dibuat: {exc}")
+
+        compare_df = compare_copyable_parameters(source, target, BASE_MAPPING)
+        if compare_df.empty:
+            st.info("Tidak ada parameter referensi yang dapat dicopy dengan mapping PATCH saat ini.")
         else:
-            st.info("Pilih field yang mau dicopy, atau gunakan Excel/JSON Full IO sebagai referensi manual.")
+            different_count = int((compare_df["Status"] == "Different").sum())
+            metric1, metric2, metric3 = st.columns(3)
+            metric1.metric("Parameter tersedia", len(compare_df))
+            metric2.metric("Nilai berbeda", different_count)
+            metric3.metric("Dipilih untuk Copy", len(st.session_state["full_copy_selected"]))
+
+            only_diff = st.toggle("Different only — tampilkan parameter yang berbeda", value=True)
+            actions1, actions2 = st.columns(2)
+            if actions1.button("Select All Differences", use_container_width=True):
+                st.session_state["full_copy_selected"] = compare_df.loc[
+                    compare_df["Status"] == "Different", "Field"
+                ].tolist()
+                st.rerun()
+            if actions2.button("Clear Selection", use_container_width=True):
+                st.session_state["full_copy_selected"] = []
+                st.rerun()
+
+            visible = (
+                compare_df.loc[compare_df["Status"] == "Different"].copy()
+                if only_diff else compare_df.copy()
+            )
+            selected_set = set(st.session_state["full_copy_selected"])
+            visible.insert(0, "Copy", visible["Field"].isin(selected_set))
+            # Filter toggles do not discard selected fields that are temporarily hidden.
+            edited = st.data_editor(
+                visible,
+                hide_index=True,
+                use_container_width=True,
+                disabled=["Field", "Parameter", "Section", "Reference Value", "Target Value", "Status"],
+                column_config={
+                    "Copy": st.column_config.CheckboxColumn(
+                        "Copy", help="Centang untuk menyalin parameter ke target IO."
+                    ),
+                    "Field": st.column_config.TextColumn("REST Field"),
+                    "Parameter": st.column_config.TextColumn("Parameter"),
+                    "Section": st.column_config.TextColumn("Section"),
+                    "Reference Value": st.column_config.TextColumn("Reference (After)"),
+                    "Target Value": st.column_config.TextColumn("Target (Before)"),
+                    "Status": st.column_config.TextColumn("Status"),
+                },
+                key=f"full_copy_editor_{source_id}_{target_id}_{'diff' if only_diff else 'all'}",
+            )
+            visible_fields = set(visible["Field"])
+            previously_hidden = selected_set - visible_fields
+            selected_fields = (
+                previously_hidden | set(edited.loc[edited["Copy"], "Field"].tolist())
+            )
+            # Preserve mapping order for deterministic Excel/JSON export.
+            ordered = [
+                field for field in compare_df["Field"].tolist() if field in selected_fields
+            ]
+            st.session_state["full_copy_selected"] = ordered
+            st.caption(
+                f"{len(ordered)} parameter dipilih. "
+                "Filter tidak membatalkan pilihan yang sedang tersembunyi."
+            )
+
+            if ordered:
+                try:
+                    template_df, mapping = build_copy_patch(source, target, BASE_MAPPING, ordered)
+                    st.markdown("#### PATCH Preview — Before → After")
+                    selection_rows = compare_df.loc[compare_df["Field"].isin(ordered)].copy()
+                    st.dataframe(
+                        selection_rows[["Parameter", "Field", "Target Value", "Reference Value", "Status"]].rename(
+                            columns={
+                                "Target Value": "Before (Target)",
+                                "Reference Value": "After (Reference)",
+                            }
+                        ),
+                        hide_index=True,
+                        use_container_width=True,
+                    )
+                    st.warning(
+                        "Pastikan parameter cocok untuk IO target. Nilai existing dari IO lain "
+                        "tidak otomatis menjamin PATCH diterima Oracle. Download dan periksa "
+                        "file sebelum melakukan live PATCH di Setup Runner."
+                    )
+                    payload = build_payload_from_row(template_df.iloc[0], mapping)
+                    with st.expander("Preview PATCH payload", expanded=False):
+                        st.json(payload)
+                        st.caption("Route menuju Target IO; payload berisi field yang dicentang saja.")
+                    p1, p2 = st.columns(2)
+                    with p1:
+                        st.download_button(
+                            "Download PATCH Excel Template",
+                            data=make_template_excel_bytes(
+                                mapping, template_df=template_df, sheet_name="IO_Parameters_Update"
+                            ),
+                            file_name="io_parameters_patch_from_reference.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True,
+                        )
+                    with p2:
+                        st.download_button(
+                            "Download PATCH Mapping JSON",
+                            data=make_json_bytes(mapping),
+                            file_name="io_parameters_patch_from_reference_mapping.json",
+                            mime="application/json",
+                            use_container_width=True,
+                        )
+                except Exception as exc:
+                    st.error(f"Template PATCH belum bisa dibuat: {exc}")
+            else:
+                st.info(
+                    "Belum ada parameter dicentang. Pilih Copy pada baris yang diinginkan, "
+                    "atau gunakan Select All Differences untuk memilih seluruh perbedaan."
+                )
+
+        with st.expander("Advanced: lihat semua field hasil GET (termasuk yang tidak dapat di-PATCH)"):
+            st.dataframe(compare_parameters(source, target), hide_index=True, use_container_width=True)
 
 st.caption("Read-only GET pada page ini. Tidak ada POST/PATCH atau penyimpanan password ke file.")
