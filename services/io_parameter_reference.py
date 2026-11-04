@@ -51,7 +51,7 @@ def child_parameter_key(parameters: Dict[str, Any], organization_id: Any = None)
         path = unquote(urlsplit(href).path).rstrip("/")
         # Avoid confusing a collection link, a child flexfield link, or another org.
         match = re.search(
-            r"/inventoryOrganizations/(\\d+)/child/invOrgParameters/(\\d+)$", path
+            r"/inventoryOrganizations/(\d+)/child/invOrgParameters/(\d+)$", path
         )
         if match and (expected_parent is None or match.group(1) == expected_parent):
             return match.group(2)
