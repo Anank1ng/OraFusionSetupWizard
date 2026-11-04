@@ -180,6 +180,7 @@ if snapshots:
         if st.session_state.get("full_copy_pair") != selection_pair:
             st.session_state["full_copy_pair"] = selection_pair
             st.session_state["full_copy_selected"] = []
+            st.session_state["full_copy_editor_version"] = st.session_state.get("full_copy_editor_version", 0) + 1
 
         st.markdown("#### Compare & Copy IO Parameters")
         st.caption(
@@ -204,9 +205,11 @@ if snapshots:
                 st.session_state["full_copy_selected"] = compare_df.loc[
                     compare_df["Status"] == "Different", "Field"
                 ].tolist()
+                st.session_state["full_copy_editor_version"] += 1
                 st.rerun()
             if actions2.button("Clear Selection", use_container_width=True):
                 st.session_state["full_copy_selected"] = []
+                st.session_state["full_copy_editor_version"] += 1
                 st.rerun()
 
             visible = (
@@ -232,7 +235,11 @@ if snapshots:
                     "Target Value": st.column_config.TextColumn("Target (Before)"),
                     "Status": st.column_config.TextColumn("Status"),
                 },
-                key=f"full_copy_editor_{source_id}_{target_id}_{'diff' if only_diff else 'all'}",
+                key=(
+                    f"full_copy_editor_{source_id}_{target_id}_"
+                    f"{'diff' if only_diff else 'all'}_"
+                    f"{st.session_state['full_copy_editor_version']}"
+                ),
             )
             visible_fields = set(visible["Field"])
             previously_hidden = selected_set - visible_fields
