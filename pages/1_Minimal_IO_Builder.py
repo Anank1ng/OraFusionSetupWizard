@@ -18,5 +18,5 @@ master org, item grouping, item definition code, dan `ScheduleId`.
 """
 )
 
-selected_columns = field_selector(mapping, preset="minimal", key_prefix="minimal_io")
+selected_columns = field_selector(mapping, preset="minimal", key_prefix="minimal_io", show_extended_presets=False)
 render_builder_downloads(mapping, selected_columns, key_prefix="minimal_io")

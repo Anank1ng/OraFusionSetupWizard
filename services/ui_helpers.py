@@ -29,7 +29,7 @@ def render_connection_form(prefix: str = "oracle") -> tuple[str, str, str, int]:
     return base_url, username, password, int(timeout)
 
 
-def field_selector(mapping: Dict[str, Any], preset: str = "minimal", key_prefix: str = "selector") -> List[str]:
+def field_selector(mapping: Dict[str, Any], preset: str = "minimal", key_prefix: str = "selector", show_extended_presets: bool = True) -> List[str]:
     all_fields = mapping.get("fields", [])
     if f"{key_prefix}_selected" not in st.session_state:
         if preset == "minimal":
@@ -40,18 +40,24 @@ def field_selector(mapping: Dict[str, Any], preset: str = "minimal", key_prefix:
             st.session_state[f"{key_prefix}_selected"] = [f["excel_column"] for f in all_fields]
 
     selected = set(st.session_state[f"{key_prefix}_selected"])
-    c1, c2, c3 = st.columns([1, 1, 1])
-    with c1:
+    if show_extended_presets:
+        c1, c2, c3 = st.columns([1, 1, 1])
+        with c1:
+            if st.button("Use Minimal", key=f"{key_prefix}_min"):
+                selected = {f["excel_column"] for f in all_fields if f.get("include_in_minimal")}
+                st.session_state[f"{key_prefix}_selected"] = list(selected)
+        with c2:
+            if st.button("Use Standard", key=f"{key_prefix}_std"):
+                selected = {f["excel_column"] for f in all_fields if f.get("include_in_standard") or f.get("include_in_minimal")}
+                st.session_state[f"{key_prefix}_selected"] = list(selected)
+        with c3:
+            if st.button("Use All", key=f"{key_prefix}_all"):
+                selected = {f["excel_column"] for f in all_fields}
+                st.session_state[f"{key_prefix}_selected"] = list(selected)
+    else:
+        # Minimal IO page only needs the baseline preset.
         if st.button("Use Minimal", key=f"{key_prefix}_min"):
             selected = {f["excel_column"] for f in all_fields if f.get("include_in_minimal")}
-            st.session_state[f"{key_prefix}_selected"] = list(selected)
-    with c2:
-        if st.button("Use Standard", key=f"{key_prefix}_std"):
-            selected = {f["excel_column"] for f in all_fields if f.get("include_in_standard") or f.get("include_in_minimal")}
-            st.session_state[f"{key_prefix}_selected"] = list(selected)
-    with c3:
-        if st.button("Use All", key=f"{key_prefix}_all"):
-            selected = {f["excel_column"] for f in all_fields}
             st.session_state[f"{key_prefix}_selected"] = list(selected)
 
     sections = fields_by_section(mapping)
