@@ -7,7 +7,6 @@ import streamlit as st
 from services.config_loader import filter_mapping_by_preset, load_schema, schema_title
 from services.excel_service import (
     make_json_bytes,
-    make_setup_workbook_bytes,
     make_template_excel_bytes,
     read_upload_dataframe,
 )
@@ -99,48 +98,7 @@ def _extract_org_map_from_log(uploaded_log) -> Dict[str, int]:
     return result
 
 
-# Built-in downloads are kept at the top so users can grab files before running.
-st.subheader("1. Download template bawaan")
-io_mapping_builtin = BUILT_IN_MAPPINGS["Create Minimal IO"]
-subinv_mapping_builtin = BUILT_IN_MAPPINGS["Create Subinventories"]
-params_mapping_builtin = BUILT_IN_MAPPINGS["Patch IO Parameters"]
-
-c_dl1, c_dl2, c_dl3, c_dl4 = st.columns(4)
-with c_dl1:
-    st.download_button(
-        "Download Full Setup Workbook",
-        data=make_setup_workbook_bytes(io_mapping_builtin, subinv_mapping_builtin, params_mapping_builtin),
-        file_name="io_setup_workbook.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
-    )
-with c_dl2:
-    st.download_button(
-        "Template Minimal IO",
-        data=make_template_excel_bytes(io_mapping_builtin),
-        file_name="minimal_inventory_organizations_template.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
-    )
-with c_dl3:
-    st.download_button(
-        "Template Subinventories",
-        data=make_template_excel_bytes(subinv_mapping_builtin),
-        file_name="subinventories_template.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
-    )
-with c_dl4:
-    st.download_button(
-        "Template IO Parameters",
-        data=make_template_excel_bytes(params_mapping_builtin),
-        file_name="io_parameters_update_template.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
-    )
-
-st.divider()
-st.subheader("2. Pilih proses yang mau dijalankan")
+st.subheader("1. Pilih proses yang mau dijalankan")
 process = st.radio(
     "Entity process",
     ["Create Minimal IO", "Create Subinventories", "Patch IO Parameters"],
@@ -151,7 +109,7 @@ process = st.radio(
 note = PROCESS_NOTES[process]
 st.info(f"**{process}** — {note['desc']}\n\n**Kebutuhan:** {note['needs']}")
 
-st.subheader("3. Mapping & input file")
+st.subheader("2. Mapping & input file")
 builtin_mapping = BUILT_IN_MAPPINGS[process]
 
 m1, m2 = st.columns([1, 1])
@@ -200,7 +158,7 @@ uploaded = st.file_uploader(
 )
 
 st.divider()
-st.subheader("4. Connection & run options")
+st.subheader("3. Connection & run options")
 base_url, username, password, timeout = render_connection_form("runner_entity")
 
 opt_cols = st.columns(4)
@@ -228,7 +186,7 @@ if uploaded:
         st.error(f"Gagal membaca file upload: {exc}")
         st.stop()
 
-    st.subheader("5. Preview & validation")
+    st.subheader("4. Preview & validation")
     st.caption(f"Worksheet target: {mapping.get('worksheet_name', 'Upload_Template')} | Rows terbaca: {len(df)}")
     st.dataframe(df, use_container_width=True)
 
@@ -253,7 +211,7 @@ if uploaded:
                 st.write("Payload errors")
                 st.dataframe(summary["payload_errors"], use_container_width=True)
 
-    st.subheader("6. Run selected process")
+    st.subheader("5. Run selected process")
     cfg = RunnerConfig(dry_run=dry_run, upsert_io=upsert_io, stop_on_error=stop_on_error)
 
     if not df.empty:
